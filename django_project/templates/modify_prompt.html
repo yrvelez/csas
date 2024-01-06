@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Modify Prompt</title>
+    <!-- Add any required CSS -->
+</head>
+<body>
+    <h1>Modify Prompt</h1>
+    <form method="post" action="">
+        {% csrf_token %}
+        <div>
+            <label for="modified_issue">Modify Issue:</label>
+            <textarea id="modified_issue" name="modified_issue" rows="4" cols="50">{{ original_issue }}</textarea>
+        </div>
+        <input type="hidden" name="ai_choice" value="{{ ai_choice }}">
+        <div>
+            <input type="submit" value="Submit Modified Prompt">
+        </div>
+    </form>
+</body>
+</html>

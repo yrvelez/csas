@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSAS Helper</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+    <style>
+        .copy-button {
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            padding: 5px 10px;
+            border: none;
+            border-radius: 4px;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4">
+        <div class="max-w-md mx-auto mt-10">
+            <h1 class="text-3xl font-bold text-gray-700 mb-6 text-center">CSAS Helper</h1>
+            <form method="post" action="{% url 'main_page' %}" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                {% csrf_token %}
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" for="issue">Enter Open-Ended Response:</label>
+                    <input type="text" id="issue" name="issue" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="Response...">
+                </div>
+                  <div class="mb-4">
+                  <label class="block text-gray-700 text-sm font-bold mb-2" for="issue">Enter Prompt:</label>
+                  <textarea id="prompt" name="prompt" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="If this isn't modified, use most important issue prompt." style="white-space: pre-wrap;"></textarea>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" for="aiChoice">Select API:</label>
+                    <select name="ai_choice" id="aiChoice" onchange="updateURLs()" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                        <option value="openai" selected>OpenAI (GPT-4)</option>
+                        <option value="mistral">AnyScale (Mixtral 8x7b)</option>
+                    </select>
+                </div>
+              <div class="mb-4">
+                  <label class="block text-gray-700 text-sm font-bold mb-2" for="num_items">Number of Dynamic Items</label>
+                  <input type="text" id="num_items" name="num_items" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="#">
+              </div>
+              <div class="flex items-center justify-center">
+                  <button type="button" onclick="saveSessionData()" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline cursor-pointer">Save Settings</button>
+              </div>
+              <br>
+              <div class="mb-4">
+                <div class="flex items-center justify-center">
+                    <input type="submit" value="Test and Verify" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline cursor-pointer">
+                </div>
+              </div>
+
+              <a href="{% url 'view_db_content' %}" class="text-blue-500 hover:text-blue-700">View Database Content</a>
+            </form>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Copy and paste this into Qualtrics for Input Step:</label>
+                <input type="text" id="dynamicIssueUrl" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" readonly>
+                <button onclick="copyToClipboard('dynamicIssueUrl')" class="copy-button mt-2">Copy</button>
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Copy and paste this into Qualtrics for Sampling Step:</label>
+                <input type="text" value="{{ select_questions_simulation_url }}" id="selectQuestionsSimulationUrl" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" readonly>
+                <button onclick="copyToClipboard('selectQuestionsSimulationUrl')" class="copy-button mt-2">Copy</button>
+            </div>
+      <div class="mb-4">
+              <label class="block text-gray-700 text-sm font-bold mb-2">Copy and paste this into Qualtrics for Updating Step:</label>
+              <input type="text" value="{{ update_rating_url }}" id="updateRatingsUrl" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" readonly>
+              <button onclick="copyToClipboard('updateRatingsUrl')" class="copy-button mt-2">Copy</button>
+          </div>
+      </div>
+    </div>
+ 
+
+    <script>
+        window.onload = function() {
+            updateURLs(); // Call this function on page load to set the initial URL
+        };
+
+        function updateURLs() {
+            var aiChoice = document.getElementById("aiChoice").value;
+            var dynamicIssueUrl = document.getElementById("dynamicIssueUrl");
+            if (aiChoice === 'openai') {
+                dynamicIssueUrl.value = '{{ dynamic_issue_url_oai }}';
+            } else if (aiChoice === 'mistral') {
+                dynamicIssueUrl.value = '{{ dynamic_issue_url_mistral }}';
+            }
+        }
+
+        function copyToClipboard(elementId) {
+            var copyText = document.getElementById(elementId);
+            copyText.select();
+            document.execCommand('copy');
+            alert('Copied: ' + copyText.value);
+        }
+
+
+        function saveSessionData() {
+            var issue = document.getElementById('issue').value;
+            var prompt = document.getElementById('prompt').value;
+            var aiChoice = document.getElementById('aiChoice').value;
+            var num_items = document.getElementById('num_items').value; // 
+  
+            var data = {
+                'issue': issue,
+                'prompt': prompt,
+                'ai_choice': aiChoice,
+                'num_items': num_items
+            };
+  
+            fetch('{% url "save_session" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert('Session data saved successfully');
+                console.log(data);
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+            });
+        }
+    </script>
+</body>
+</html>
