@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.urls import path  # This import statement is necessary
-from csas.views import dynamic_issue_openai, dynamic_issue_mistral, view_issues, update_rating, select_questions_simulation, main_page, fetch_openai_completion, upload_completion, view_db_content, fetch_mistral_completion, save_session_data
+from csas.views import dynamic_issue_openai, dynamic_issue_mistral, view_issues, update_rating, select_questions_simulation, main_page, fetch_openai_completion, upload_completion, view_db_content, fetch_mistral_completion, save_session_data, upload_completions, survey_view, update_ratings
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -24,5 +24,8 @@ urlpatterns = [
          fetch_mistral_completion,
          name='fetch_mistral_completion'),
     path('upload-completion/', upload_completion, name='upload_completion'),
-    path('view-db-content/', view_db_content, name='view_db_content')
+    path('upload-completions/', upload_completions, name='upload_completions'),
+    path('view-db-content/', view_db_content, name='view_db_content'),
+    path('survey/', survey_view, name='survey'),
+    path('update-ratings/', update_ratings, name='update_ratings')
 ]

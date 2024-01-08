@@ -4,14 +4,14 @@ import numpy as np
 import os
 from django.http import JsonResponse, HttpResponseRedirect
 from django.views.decorators.http import require_http_methods
-from csas.models import DynamicIssueQuestion
+from .models import DynamicIssueQuestion
 from django.views.decorators.csrf import csrf_exempt
 from django.core import serializers
 from django.urls import reverse
 from django.shortcuts import render, redirect, reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from csas.embeds import generate_embedding, cosine_similarity_knn, find_similar_issues, has_high_similarity, is_text_toxic, is_text_toxic_alt, has_high_similarity_alt, find_similar_issues_alt, generate_embedding_alt
+from .embeds import generate_embedding, cosine_similarity_knn, find_similar_issues, has_high_similarity, is_text_toxic, is_text_toxic_alt, has_high_similarity_alt, find_similar_issues_alt, generate_embedding_alt
 
 def view_db_content(request):
     questions = DynamicIssueQuestion.objects.all()
@@ -26,12 +26,18 @@ def save_session_data(request):
         request.session['prompt'] = data.get('prompt')
         request.session['ai_choice'] = data.get('ai_choice')
         request.session['num_items'] = data.get('num_items')
+        request.session['min_scale'] = data.get('min_scale')
+        request.session['max_scale'] = data.get('max_scale')
+        request.session['survey_text'] = data.get('survey_text')
 
         # Create a dictionary of the session data
         session_data = {
             'prompt': request.session.get('prompt'),
-            'ai_choice': request.session.get('ai_choice'),
-            'num_items': request.session.get('num_items')
+            'ai_choice': request.session.get('ai_choice', 'openai'),
+            'num_items': request.session.get('num_items', 3),
+            'min_scale': request.session.get('min_scale', 1),
+            'max_scale': request.session.get('max_scale', 5),
+            'survey_text': request.session.get('survey_text', 'Rate on a 1-5 scale.')
         }
 
         # Return both received and session data in the response
@@ -49,10 +55,10 @@ def save_session_data(request):
         },
                             status=400)
 
-
 @csrf_exempt
 @require_http_methods(["POST"])
 def upload_completion(request):
+
     completion = request.POST.get('completion')
     ai_choice = request.POST.get('ai_choice')
     issue = request.POST.get('issue')
@@ -69,11 +75,14 @@ def upload_completion(request):
         existing_question = DynamicIssueQuestion.objects.filter(
             question=completion).first()
 
+        # Get midpoint of the scale from session
+        midpoint = (float(request.session.get('min_scale')) + float(request.session.get('max_scale'))) / 2
+
         if existing_question or has_high_similarity(
                 completion) or is_text_toxic(completion):
             # We will reuse the update_rating logic here, you'll likely want to abstract this logic into a common function
             new_rating = request.POST.get(
-                'rating', 3)  # Default to 3 if no rating is provided
+                'rating', midpoint)  # Default to midpoint if no rating is provided
             new_rating = float(new_rating)
 
             # Update the existing question rating
@@ -91,7 +100,7 @@ def upload_completion(request):
                 embed_completion = generate_embedding(completion)
                 # No existing question found and it's not similar or toxic, create a new one
                 new_question = DynamicIssueQuestion(question=completion,
-                                                    avg_rating=3,
+                                                    avg_rating=midpoint,
                                                     ratings=1,
                                                     var_rating=1,
                                                     embedding=embed_completion)
@@ -102,6 +111,53 @@ def upload_completion(request):
         return redirect('view_db_content')
 
     return redirect('fetch_mistral_completion', issue=issue)
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def upload_completions(request):
+    completions = request.POST.getlist('approved_completions')
+    ai_choice = request.POST.get('ai_choice')
+
+    # Get midpoint
+    midpoint = (float(request.session.get('min_scale')) + float(request.session.get('max_scale'))) / 2
+
+    # If midpoint is empty, set it to 3
+    if not midpoint:
+        midpoint = 3
+
+    new_rating = float(request.POST.get('rating', midpoint))  # Get the rating outside the loop
+
+    if completions:
+        # Select the appropriate functions based on ai_choice
+        similarity_check = has_high_similarity_alt if ai_choice == 'mistral' else has_high_similarity
+        toxicity_check = is_text_toxic_alt if ai_choice == 'mistral' else is_text_toxic
+
+        for completion in completions:
+            try:
+                existing_question = DynamicIssueQuestion.objects.filter(question=completion).first()
+
+                if existing_question:
+                    # Update the existing question rating
+                    update_existing_question_rating(existing_question, new_rating)
+                elif not similarity_check(completion) and not toxicity_check(completion):
+                    embed_completion = generate_embedding(completion)
+                    # Create a new question
+                    new_question = DynamicIssueQuestion(question=completion, avg_rating=new_rating, ratings=1, var_rating=1, embedding=embed_completion)
+                    new_question.save()
+                # If completion is similar or toxic, no action is taken
+            except Exception as e:
+                # Log the exception or handle it as needed
+                print(f"Error processing completion '{completion}': {str(e)}")
+
+        return redirect('view_db_content')
+
+    return redirect('view_db_content')
+
+def update_existing_question_rating(question, new_rating):
+    question.ratings += 1
+    question.avg_rating = ((question.avg_rating * (question.ratings - 1)) + new_rating) / question.ratings
+    question.var_rating = 1 / question.ratings
+    question.save()
 
 
 @csrf_exempt
@@ -137,12 +193,15 @@ def main_page(request):
             reverse('select_questions_simulation'))
         update_rating_url = request.build_absolute_uri(
             reverse('update_rating'))
+        ez_url = request.build_absolute_uri(
+            reverse('survey'))
 
         context = {
             'dynamic_issue_url_oai': dynamic_issue_url_oai,
             'dynamic_issue_url_mistral': dynamic_issue_url_mistral,
             'select_questions_simulation_url': select_questions_simulation_url,
-            'update_rating_url': update_rating_url
+            'update_rating_url': update_rating_url,
+            'ez_url': ez_url
         }
 
     return render(request, 'main.html', context)
@@ -155,45 +214,53 @@ def fetch_mistral_completion(
     issue,
     prompt="You are a classification expert who takes an input and returns a political issue as a summary. Please extract the political issue or concern mentioned by the respondent using one to three words. Be descriptive and stay true to what the user has written. Select only one issue, concern, or topic. Never ask about two issues.\nIf a related issue or theme has already been mentioned, return the same issue or theme as the output. You must only return one issue. Do not duplicate broad issue areas or themes. You must only return an issue. Keep it short.\n Examples:\nPreviously Mentioned Issues () I care about the environment.->Environment######Previously Mentioned Issues (Taxation) My taxes are too high.->Taxation######"
 ):
+    issues_list = issue.split(';')  # Split the issue string into a list
+    completions = []  # List to hold completions for each issue
 
-    try:
-        previous_list = ', '.join(find_similar_issues_alt(issue))
-    except:
-        previous_list = ''
+    for single_issue in issues_list:
+        try:
+            previous_list = ', '.join(find_similar_issues_alt(single_issue))
+        except:
+            previous_list = ''
 
-    data = {
-        'model':
-        'mistralai/Mixtral-8x7B-Instruct-v0.1',
-        'messages': [{
-            'role':
-            'user',
-            'content':
-            f"{prompt}Previously Mentioned Issues ({previous_list}) {issue}->"
-        }],
-        'temperature':
-        0,
-        'max_tokens':
-        10
-    }
+        data = {
+            'model':
+            'mistralai/Mixtral-8x7B-Instruct-v0.1',
+            'messages': [{
+                'role':
+                'user',
+                'content':
+                f"{prompt}Previously Mentioned Issues ({previous_list}) {single_issue}->"
+            }],
+            'temperature':
+            0,
+            'max_tokens':
+            10
+        }
 
-    response = requests.Session().post(
-        "https://api.endpoints.anyscale.com/v1/chat/completions",
-        headers={"Authorization": f"Bearer " + os.environ["ANYSCALE_API_KEY"]},
-        json=data)
+        response = requests.Session().post(
+            "https://api.endpoints.anyscale.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer " + os.environ["ANYSCALE_API_KEY"]
+            },
+            json=data)
 
-    completion = response.json().get('choices',
-                                     [{}])[0].get('message',
-                                                  {}).get('content', '')
-    completion = completion.split('#')[0].split('\n')[0].split(
-        'Previously')[0].split('/')[0].split(';')[0]
+        completion = response.json().get('choices',
+                                         [{}])[0].get('message',
+                                                      {}).get('content', '')
+        completion = completion.split('#')[0].split('\n')[0].split(
+            'Previously')[0].split('/')[0].split(';')[0]
+        completion = completion.lstrip()  # Remove leading white space
 
-    # Remove leading white space
-    completion = completion.lstrip()
+        completions.append(completion)  # Append the completion to the list
 
-    return render(request, 'show_completion.html', {
-        'completion': completion,
-        'issue': issue
-    })
+    return render(
+        request,
+        'show_completion.html',
+        {
+            'completions': completions,  # Return the list of completions
+            'issue': issue
+        })
 
 
 @csrf_exempt
@@ -203,48 +270,62 @@ def fetch_openai_completion(
     issue,
     prompt="Please extract the political issue or concern mentioned by the respondent using one to three words. Be descriptive and stay true to what the user has written. Select only one issue, concern, or topic. Never ask about two issues.\nIf a related issue or theme has already been mentioned, return the same issue or theme as the output. You must only return one issue. Do not duplicate broad issue areas or themes.\n Examples:\nPreviously Mentioned Issues () I care about the environment.->Environment######Previously Mentioned Issues (Taxation) My taxes are too high.->Taxation######Previously Mentioned Issues () Abortion should be legal under all circumstances.->Abortion######Previously Mentioned Issues (Immigration) Close the borders.->Immigration######Previously Mentioned Issues (Inflation) I am concerned about rising prices.->Inflation######Previously Mentioned Issues () "
 ):
-    try:
-        previous_list = ', '.join(find_similar_issues(issue))
-    except:
-        previous_list = ''
+    issues_list = issue.split(';')  # Split the issue string into a list
+    completions = []  # List to hold completions for each issue
 
-    data = {
-        'model':
-        'gpt-4',
-        'messages': [{
-            'role':
-            'system',
-            'content':
-            f"Previously Mentioned Issues ({previous_list}) {prompt}{issue}->"
-        }],
-        'temperature':
-        0,
-        'max_tokens':
-        15
-    }
+    for single_issue in issues_list:
+        try:
+            previous_list = ', '.join(find_similar_issues(single_issue))
+        except:
+            previous_list = ''
 
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {os.environ["OPENAI_API_KEY"]}'
-    }
+        data = {
+            'model':
+            'gpt-4',
+            'messages': [{
+                'role':
+                'system',
+                'content':
+                f"Previously Mentioned Issues ({previous_list}) {prompt}{single_issue}->"
+            }],
+            'temperature':
+            0,
+            'max_tokens':
+            15
+        }
 
-    response = requests.post('https://api.openai.com/v1/chat/completions',
-                             headers=headers,
-                             data=json.dumps(data))
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {os.environ["OPENAI_API_KEY"]}'
+        }
 
-    completion = response.json().get('choices',
-                                     [{}])[0].get('message',
-                                                  {}).get('content', '')
+        response = requests.post('https://api.openai.com/v1/chat/completions',
+                                 headers=headers,
+                                 data=json.dumps(data))
 
-    return render(request, 'show_completion.html', {
-        'completion': completion,
-        'issue': issue
-    })
+        completion = response.json().get('choices',
+                                         [{}])[0].get('message',
+                                                      {}).get('content', '')
+        completions.append(completion)  # Append the completion to the list
 
+    return render(
+        request,
+        'show_completion.html',
+        {
+            'completions': completions,  # Return the list of completions
+            'issue': issue
+        })
 
-@require_http_methods(["GET"])
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
 def dynamic_issue_openai(request):
-    issue = request.GET.get('input')
+
+    # Check if the request is POST and parse JSON data
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        issue = data.get('input')
+    else:  # For GET request
+        issue = request.GET.get('input')
 
     prompt_template = "Please extract the political issue or concern mentioned by the respondent using one to three words. Be descriptive and stay true to what the user has written. Select only one issue, concern, or topic. Never ask about two issues.\nIf a related issue or theme has already been mentioned, return the same issue or theme as the output. You must only return one issue. Do not duplicate broad issue areas or themes. If an issue is not political or irrelevant, return Room Temperature Semiconductors.\n Examples:\nPreviously Mentioned Issues () I care about the environment.->Environment######Previously Mentioned Issues (Taxation) My taxes are too high.->Taxation######Previously Mentioned Issues () Abortion should be legal under all circumstances.->Abortion######Previously Mentioned Issues (Immigration) Close the borders.->Immigration######Previously Mentioned Issues (Inflation) I am concerned about rising prices.->Inflation######"
 
@@ -295,6 +376,14 @@ def dynamic_issue_openai(request):
                                                   {}).get('content', '')
     embed_completion = generate_embedding(completion)
 
+    # Get midpoint
+    midpoint = (float(request.session.get('min_scale')) + float(request.session.get('max_scale'))) / 2
+
+    # If midpoint is empty, set it to 3
+    if not midpoint:
+        midpoint = 3
+
+
     # Check if the completion is toxic, similar, or identical
     if is_text_toxic(completion) or has_high_similarity(completion):
         # Return a random question from the database as the completion
@@ -305,7 +394,7 @@ def dynamic_issue_openai(request):
         # Set default ratings for the new question
         dynamic_issue_question = DynamicIssueQuestion(
             question=completion,
-            avg_rating=3,
+            avg_rating=midpoint,
             ratings=1,
             var_rating=1,
             embedding=embed_completion)
@@ -313,8 +402,8 @@ def dynamic_issue_openai(request):
 
     return JsonResponse({'completion': completion})
 
-
-@require_http_methods(["GET"])
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
 def dynamic_issue_mistral(request):
     issue = request.GET.get('input')
 
@@ -346,10 +435,17 @@ def dynamic_issue_mistral(request):
                                      [{}])[0].get('message',
                                                   {}).get('content', '')
 
-    completion = completion.strip().split('#')[0].strip().split('\n')[0].strip(
-    ).split('Previously')[0].strip().split('/')[0].strip().split(';')[0].strip(
-    ).split(',')[0].strip().split('&')[0].strip().split('and')[0].strip()
+    completion = completion.strip().split('#')[0].strip().split(
+        '\n')[0].strip().split('Previously')[0].strip().split(
+            '/')[0].strip().split(';')[0].strip()
     embed_completion = generate_embedding_alt(completion)
+
+    # Get midpoint
+    midpoint = (float(request.session.get('min_scale')) + float(request.session.get('max_scale'))) / 2
+
+    # If midpoint is empty, set it to 3
+    if not midpoint:
+        midpoint = 3
 
     # Check if the completion is toxic, similar, or identical
     if is_text_toxic_alt(completion) or has_high_similarity_alt(completion):
@@ -361,7 +457,7 @@ def dynamic_issue_mistral(request):
         # Set default ratings for the new question
         dynamic_issue_question = DynamicIssueQuestion(
             question=completion,
-            avg_rating=3,
+            avg_rating=midpoint,
             ratings=1,
             var_rating=1,
             embedding=embed_completion)
@@ -415,13 +511,51 @@ def update_rating(request):
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
+@csrf_exempt  
+@require_http_methods(["POST"])
+def update_ratings(request):
+    try:
+        data = json.loads(request.body)
+        if not data:
+            return JsonResponse({'status': 'error', 'message': 'No data provided.'}, status=400)
+
+        for question_text, rating in data.items():
+            try:
+                rating = float(rating)
+                # Check if session min_scale and max_scale are set. If not, set to 1 and 5 respectively
+                if not request.session.get('min_scale'):
+                    request.session['min_scale'] = 1
+                if not request.session.get('max_scale'):
+                    request.session['max_scale'] = 5
+
+                if rating < float(request.session.get('min_scale')) or rating > float(request.session.get('max_scale')):
+                    continue  # Skip invalid ratings
+
+                # Retrieve the question from the database
+                question = DynamicIssueQuestion.objects.get(question=question_text)
+                question.avg_rating = ((question.avg_rating * question.ratings) + rating) / (question.ratings + 1)
+                question.ratings += 1
+                question.save()
+
+            except DynamicIssueQuestion.DoesNotExist:
+                # Skip if question not found
+                continue
+            except ValueError:
+                # Skip if the rating is not a valid number
+                continue
+
+        return JsonResponse({'status': 'success', 'message': 'Ratings updated successfully.'})
+
+    except json.JSONDecodeError:
+        return JsonResponse({'status': 'error', 'message': 'Invalid JSON format.'}, status=400)
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 @require_http_methods(["GET"])
 def view_issues(request):
     questions = DynamicIssueQuestion.objects.all()
     questions_json = serializers.serialize('json', questions)
     return JsonResponse(questions_json, safe=False)
-
 
 def select_questions_simulation(request):
     # Getting all questions from the database
@@ -434,7 +568,7 @@ def select_questions_simulation(request):
         means.append([question['avg_rating']])
         covariances.append(np.diag([question['var_rating']]))
 
-    # Run 250 simulations
+    # Run 5000 simulations
     num_sims = 250
     results = []
     for _ in range(num_sims):
@@ -454,10 +588,16 @@ def select_questions_simulation(request):
     proportions = np.maximum(proportions, floor)
     proportions /= proportions.sum()
 
+    # Get midpoint
+    midpoint = (float(request.session.get('min_scale')) + float(request.session.get('max_scale'))) / 2
+    # If midpoint is empty, set it to 3
+    if not midpoint:
+        midpoint = 3
+
     num_items_str = request.session.get('num_items')
     print(num_items_str)
     # Set a default value if num_items is not found or if it's None
-    num_items = int(num_items_str) if num_items_str is not None else 3
+    num_items = int(num_items_str) if num_items_str is not None else midpoint
     # Randomly select K questions based on the proportions
     selected_indices = np.random.choice(len(questions),
                                         size=num_items,
@@ -475,3 +615,20 @@ def select_questions_simulation(request):
         selected_questions[f'pr_{idx}'] = proportions[i]
 
     return JsonResponse(selected_questions, safe=False)
+
+def survey_view(request):
+    min_scale = request.session.get('min_scale', 1)  # Default to 1 if not set
+    max_scale = request.session.get('max_scale', 5)  # Default to 5 if not set
+    survey_text = request.session.get('survey_text', 'Rate the questions in importance on a 1-5 scale.')
+
+    if survey_text is None:
+        survey_text = 'Rate the questions in importance on a 1-5 scale.'
+
+    # Add them to the context
+    context = {
+        'min_scale': min_scale,
+        'max_scale': max_scale,
+        'survey_text': survey_text
+    }
+
+    return render(request, 'survey.html', context)

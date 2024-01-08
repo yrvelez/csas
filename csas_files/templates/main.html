@@ -4,73 +4,148 @@
     <title>CSAS Helper</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
     <style>
-        .copy-button {
-            cursor: pointer;
+        /* Improved Styles */
+        .two-column-layout {
+            display: block;
+        }
+
+        .column {
+            margin-bottom: 1rem; /* Spacing between columns on mobile */
+        }
+
+        @media (min-width: 768px) {
+            .two-column-layout {
+                display: flex;
+                flex-direction: row;
+                justify-content: space-between;
+                gap: 10px; /* Spacing between columns */
+            }
+
+            .column {
+                margin-bottom: 0;
+            }
+        }
+
+        .column-form, .column-links {
+            background: white;
+            padding: 15px;
+            border-radius: 2px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            color: #333;
+            margin-bottom: 1rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+
+        input, textarea, select, button {
+            width: 100%;
+            border-radius: 2px;
+            border: 1px solid #ddd;
+        }
+
+        button {
             background-color: #4CAF50;
             color: white;
-            padding: 5px 10px;
-            border: none;
-            border-radius: 4px;
-            margin-left: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #45a049;
         }
     </style>
 </head>
 <body class="bg-gray-100">
     <div class="container mx-auto px-4">
-        <div class="max-w-md mx-auto mt-10">
+        <div class="max-w-4xl mx-auto mt-10">
             <h1 class="text-3xl font-bold text-gray-700 mb-6 text-center">CSAS Helper</h1>
-            <form method="post" action="{% url 'main_page' %}" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
-                {% csrf_token %}
-                <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-2" for="issue">Enter Open-Ended Response:</label>
-                    <input type="text" id="issue" name="issue" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="Response...">
-                </div>
-                  <div class="mb-4">
-                  <label class="block text-gray-700 text-sm font-bold mb-2" for="issue">Enter Prompt:</label>
-                  <textarea id="prompt" name="prompt" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="If this isn't modified, use most important issue prompt." style="white-space: pre-wrap;"></textarea>
-                </div>
-                <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-2" for="aiChoice">Select API:</label>
-                    <select name="ai_choice" id="aiChoice" onchange="updateURLs()" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
-                        <option value="openai" selected>OpenAI (GPT-4)</option>
-                        <option value="mistral">AnyScale (Mixtral 8x7b)</option>
-                    </select>
-                </div>
-              <div class="mb-4">
-                  <label class="block text-gray-700 text-sm font-bold mb-2" for="num_items">Number of Dynamic Items</label>
-                  <input type="text" id="num_items" name="num_items" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="#">
-              </div>
-              <div class="flex items-center justify-center">
-                  <button type="button" onclick="saveSessionData()" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline cursor-pointer">Save Settings</button>
-              </div>
-              <br>
-              <div class="mb-4">
-                <div class="flex items-center justify-center">
-                    <input type="submit" value="Test and Verify" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline cursor-pointer">
-                </div>
-              </div>
 
-              <a href="{% url 'view_db_content' %}" class="text-blue-500 hover:text-blue-700">View Database Content</a>
-            </form>
-            <div class="mb-4">
-                <label class="block text-gray-700 text-sm font-bold mb-2">Copy and paste this into Qualtrics for Input Step:</label>
-                <input type="text" id="dynamicIssueUrl" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" readonly>
-                <button onclick="copyToClipboard('dynamicIssueUrl')" class="copy-button mt-2">Copy</button>
+            <div class="two-column-layout">
+                <!-- Left column for the form -->
+                <div class="left-column column">
+                    <div class="column-form">
+                        <form method="post" action="{% url 'main_page' %}" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                            {% csrf_token %}
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="issues">Enter Initial Seed Items (Semicolon delimited):</label>
+                                <textarea id="issue" name="issue" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="Seed Item 1; Seed Item 2; Seed Item 3"></textarea>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="issue">Enter Prompt:</label>
+                                <textarea id="prompt" name="prompt" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="Default (Issue Classification)" style="white-space: pre-wrap;"></textarea>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="aiChoice">Select API:</label>
+                                <select name="ai_choice" id="aiChoice" onchange="updateURLs()" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                                    <option value="openai" selected>OpenAI (GPT-4)</option>
+                                    <option value="mistral">AnyScale (Mixtral 8x7b)</option>
+                                </select>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="num_items">Number of Dynamic Items:</label>
+                                <input type="text" id="num_items" name="num_items" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="Default (3)">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="num_items">Minimum Scale Value</label>
+                                <input type="text" id="min_scale" name="min_scale" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="Default (1)">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="num_items">Maximum Scale Value</label>
+                                <input type="text" id="max_scale" name="max_scale" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="Default (5)">
+                            </div>
+                            <div class="flex items-center justify-center">
+                                <button type="button" onclick="saveSessionData()" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline cursor-pointer">1. Save Settings</button>
+                            </div>
+                            <br>
+                            <div class="mb-4">
+                                <div class="flex items-center justify-center">
+                                    <input type="submit" value="2. Upload Seed Items" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline cursor-pointer">
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Right column for the links -->
+                <div class="right-column column">
+                    <div class="column-links">
+                        <h1>Easier CSAS Implementation</h1>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2" for="issue">Set Question Text:</label>
+                            <textarea id="survey_text" name="survey_text" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="Rate on a 1-5 scale how important the issue is to you." style="white-space: pre-wrap;"></textarea>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Copy and paste this into Qualtrics for Easy CSAS:</label>
+                            <input type="text" value="{{ ez_url }}" id="EZUrl" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" readonly>
+                            <button onclick="copyToClipboard('EZUrl')" class="copy-button mt-2">Copy</button>
+                        </div>
+                        <h1>Customizable CSAS Implementation</h1>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Copy and paste this into Qualtrics for Input Step:</label>
+                            <input type="text" id="dynamicIssueUrl" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" readonly>
+                            <button onclick="copyToClipboard('dynamicIssueUrl')" class="copy-button mt-2">Copy</button>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Copy and paste this into Qualtrics for Sampling Step:</label>
+                            <input type="text" value="{{ select_questions_simulation_url }}" id="selectQuestionsSimulationUrl" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" readonly>
+                            <button onclick="copyToClipboard('selectQuestionsSimulationUrl')" class="copy-button mt-2">Copy</button>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Copy and paste this into Qualtrics for Updating Step:</label>
+                            <input type="text" value="{{ update_rating_url }}" id="updateRatingsUrl" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" readonly>
+                            <button onclick="copyToClipboard('updateRatingsUrl')" class="copy-button mt-2">Copy</button>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="mb-4">
-                <label class="block text-gray-700 text-sm font-bold mb-2">Copy and paste this into Qualtrics for Sampling Step:</label>
-                <input type="text" value="{{ select_questions_simulation_url }}" id="selectQuestionsSimulationUrl" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" readonly>
-                <button onclick="copyToClipboard('selectQuestionsSimulationUrl')" class="copy-button mt-2">Copy</button>
-            </div>
-      <div class="mb-4">
-              <label class="block text-gray-700 text-sm font-bold mb-2">Copy and paste this into Qualtrics for Updating Step:</label>
-              <input type="text" value="{{ update_rating_url }}" id="updateRatingsUrl" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" readonly>
-              <button onclick="copyToClipboard('updateRatingsUrl')" class="copy-button mt-2">Copy</button>
-          </div>
-      </div>
+        </div>
     </div>
- 
-
     <script>
         window.onload = function() {
             updateURLs(); // Call this function on page load to set the initial URL
@@ -98,13 +173,17 @@
             var issue = document.getElementById('issue').value;
             var prompt = document.getElementById('prompt').value;
             var aiChoice = document.getElementById('aiChoice').value;
-            var num_items = document.getElementById('num_items').value; // 
+            var num_items = document.getElementById('num_items').value; 
+            var min_scale = document.getElementById('min_scale').value;
+            var max_scale = document.getElementById('max_scale').value;
   
             var data = {
                 'issue': issue,
                 'prompt': prompt,
                 'ai_choice': aiChoice,
-                'num_items': num_items
+                'num_items': num_items,
+                'min_scale': min_scale,
+                'max_scale': max_scale
             };
   
             fetch('{% url "save_session" %}', {
