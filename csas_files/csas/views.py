@@ -4,56 +4,76 @@ import numpy as np
 import os
 from django.http import JsonResponse, HttpResponseRedirect
 from django.views.decorators.http import require_http_methods
-from .models import DynamicIssueQuestion
+from .models import DynamicIssueQuestion, UserDatabase, GlobalSetting
 from django.views.decorators.csrf import csrf_exempt
 from django.core import serializers
 from django.urls import reverse
 from django.shortcuts import render, redirect, reverse
+from django.contrib import admin
+from .models import GlobalSetting
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from .embeds import generate_embedding, cosine_similarity_knn, find_similar_issues, has_high_similarity, is_text_toxic, is_text_toxic_alt, has_high_similarity_alt, find_similar_issues_alt, generate_embedding_alt
+import logging
+
+
+def get_global_setting(key):
+    try:
+        return GlobalSetting.objects.get(key=key).value
+    except GlobalSetting.DoesNotExist:
+        return None
+
 
 def view_db_content(request):
     questions = DynamicIssueQuestion.objects.all()
     return render(request, 'view_db_content.html', {'questions': questions})
 
+
+def view_user_content(request):
+    user_data = UserDatabase.objects.all()
+    return render(request, 'view_user_content.html', {'user_data': user_data})
+
+
 @csrf_exempt
+@require_http_methods(["POST"])
 def save_session_data(request):
     if request.method == 'POST':
-        data = json.loads(request.body)
+        try:
+            data = json.loads(request.body)
 
-        # Update session data
-        request.session['prompt'] = data.get('prompt')
-        request.session['ai_choice'] = data.get('ai_choice')
-        request.session['num_items'] = data.get('num_items')
-        request.session['min_scale'] = data.get('min_scale')
-        request.session['max_scale'] = data.get('max_scale')
-        request.session['survey_text'] = data.get('survey_text')
+            # Iterate over each key-value pair in the received data
+            for key, value in data.items():
+                # Update or create the global setting
+                GlobalSetting.objects.update_or_create(
+                    key=key, defaults={'value': value})
 
-        # Create a dictionary of the session data
-        session_data = {
-            'prompt': request.session.get('prompt'),
-            'ai_choice': request.session.get('ai_choice', 'openai'),
-            'num_items': request.session.get('num_items', 3),
-            'min_scale': request.session.get('min_scale', 1),
-            'max_scale': request.session.get('max_scale', 5),
-            'survey_text': request.session.get('survey_text', 'Rate on a 1-5 scale.')
-        }
-
-        # Return both received and session data in the response
-        return JsonResponse({
-            'status': 'success',
-            'message': 'Session data saved',
-            'received_data': data,
-            'session_data': session_data
-        })
+            return JsonResponse({
+                'status': 'success',
+                'message': 'Global settings updated successfully',
+                'received_data': data
+            })
+        except json.JSONDecodeError:
+            return JsonResponse(
+                {
+                    'status': 'error',
+                    'message': 'Invalid JSON format'
+                },
+                status=400)
+        except Exception as e:
+            return JsonResponse({
+                'status': 'error',
+                'message': str(e)
+            },
+                                status=500)
 
     else:
-        return JsonResponse({
-            'status': 'error',
-            'message': 'Invalid request'
-        },
-                            status=400)
+        return JsonResponse(
+            {
+                'status': 'error',
+                'message': 'Invalid request method'
+            },
+            status=400)
+
 
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -76,13 +96,15 @@ def upload_completion(request):
             question=completion).first()
 
         # Get midpoint of the scale from session
-        midpoint = (float(request.session.get('min_scale')) + float(request.session.get('max_scale'))) / 2
+        midpoint = (float(get_global_setting('min_scale')) +
+                    float(get_global_setting('max_scale'))) / 2
 
         if existing_question or has_high_similarity(
                 completion) or is_text_toxic(completion):
             # We will reuse the update_rating logic here, you'll likely want to abstract this logic into a common function
             new_rating = request.POST.get(
-                'rating', midpoint)  # Default to midpoint if no rating is provided
+                'rating',
+                midpoint)  # Default to midpoint if no rating is provided
             new_rating = float(new_rating)
 
             # Update the existing question rating
@@ -91,7 +113,7 @@ def upload_completion(request):
                 (existing_question.avg_rating *
                  (existing_question.ratings - 1)) +
                 new_rating) / existing_question.ratings
-            existing_question.var_rating = 1 / existing_question.ratings
+            existing_question.var_rating = (1 / existing_question.ratings)
             existing_question.save()  # Don't forget to save the changes
         else:
 
@@ -112,6 +134,7 @@ def upload_completion(request):
 
     return redirect('fetch_mistral_completion', issue=issue)
 
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def upload_completions(request):
@@ -119,13 +142,15 @@ def upload_completions(request):
     ai_choice = request.POST.get('ai_choice')
 
     # Get midpoint
-    midpoint = (float(request.session.get('min_scale')) + float(request.session.get('max_scale'))) / 2
+    midpoint = (float(get_global_setting('min_scale')) +
+                float(get_global_setting('max_scale'))) / 2
 
     # If midpoint is empty, set it to 3
     if not midpoint:
         midpoint = 3
 
-    new_rating = float(request.POST.get('rating', midpoint))  # Get the rating outside the loop
+    new_rating = float(request.POST.get(
+        'rating', midpoint))  # Get the rating outside the loop
 
     if completions:
         # Select the appropriate functions based on ai_choice
@@ -134,15 +159,24 @@ def upload_completions(request):
 
         for completion in completions:
             try:
-                existing_question = DynamicIssueQuestion.objects.filter(question=completion).first()
+                existing_question = DynamicIssueQuestion.objects.filter(
+                    question=completion).first()
 
                 if existing_question:
                     # Update the existing question rating
-                    update_existing_question_rating(existing_question, new_rating)
-                elif not similarity_check(completion) and not toxicity_check(completion):
+                    #update_existing_question_rating(existing_question,
+                    #new_rating)
+                    pass
+                elif not similarity_check(completion) and not toxicity_check(
+                        completion):
                     embed_completion = generate_embedding(completion)
                     # Create a new question
-                    new_question = DynamicIssueQuestion(question=completion, avg_rating=new_rating, ratings=1, var_rating=1, embedding=embed_completion)
+                    new_question = DynamicIssueQuestion(
+                        question=completion,
+                        avg_rating=new_rating,
+                        ratings=1,
+                        var_rating=1,
+                        embedding=embed_completion)
                     new_question.save()
                 # If completion is similar or toxic, no action is taken
             except Exception as e:
@@ -153,10 +187,13 @@ def upload_completions(request):
 
     return redirect('view_db_content')
 
+
 def update_existing_question_rating(question, new_rating):
     question.ratings += 1
-    question.avg_rating = ((question.avg_rating * (question.ratings - 1)) + new_rating) / question.ratings
-    question.var_rating = 1 / question.ratings
+    question.avg_rating = (
+        (question.avg_rating *
+         (question.ratings - 1)) + new_rating) / question.ratings
+    question.var_rating = (1 / question.ratings)
     question.save()
 
 
@@ -164,6 +201,21 @@ def update_existing_question_rating(question, new_rating):
 @require_http_methods(["GET", "POST"])
 def main_page(request):
     context = {}
+
+    # Fetch global settings
+    settings = GlobalSetting.objects.all()
+    global_settings = {setting.key: setting.value for setting in settings}
+
+    # Use global settings or default values
+    session_data = {
+        'prompt': global_settings.get('prompt', 'Default Prompt'),
+        'ai_choice': global_settings.get('ai_choice', 'openai'),
+        'num_items': global_settings.get('num_items', '3'),
+        'min_scale': global_settings.get('min_scale', '1'),
+        'max_scale': global_settings.get('max_scale', '5'),
+        'survey_text': global_settings.get('survey_text',
+                                           'Rate on a 1-5 scale.')
+    }
 
     if request.method == 'POST':
         issue = request.POST.get('issue')
@@ -186,15 +238,19 @@ def main_page(request):
 
         # Update the URLs to include the prompt
         dynamic_issue_url_oai = request.build_absolute_uri(
-            '/dynamic-issue-oai/')
+            '/dynamic-issue-oai/').replace('http:', 'https:')
         dynamic_issue_url_mistral = request.build_absolute_uri(
-            '/dynamic-issue-mistral/')
+            '/dynamic-issue-mistral/').replace('http:', 'https:')
         select_questions_simulation_url = request.build_absolute_uri(
-            reverse('select_questions_simulation'))
+            reverse('select_questions_simulation')).replace('http:', 'https:')
         update_rating_url = request.build_absolute_uri(
-            reverse('update_rating'))
-        ez_url = request.build_absolute_uri(
-            reverse('survey'))
+            reverse('update_rating')).replace('http:', 'https:')
+        ez_url = request.build_absolute_uri(reverse('survey')).replace(
+            'http:', 'https:').replace(
+                'survey/', 'survey') + '?id=${e://Field/ResponseID}'
+
+        # Add embed iframe for ez_url
+        ez_url = f'<iframe src="{ez_url}" width="500" height="500" frameborder="0" style="border:0" allowfullscreen></iframe>'
 
         context = {
             'dynamic_issue_url_oai': dynamic_issue_url_oai,
@@ -281,7 +337,7 @@ def fetch_openai_completion(
 
         data = {
             'model':
-            'gpt-4',
+            'gpt-3.5-turbo',
             'messages': [{
                 'role':
                 'system',
@@ -315,6 +371,7 @@ def fetch_openai_completion(
             'completions': completions,  # Return the list of completions
             'issue': issue
         })
+
 
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
@@ -350,7 +407,7 @@ def dynamic_issue_openai(request):
 
     data = {
         'model':
-        'gpt-4',
+        'gpt-3.5-turbo',
         'messages': [{
             'role':
             'system',
@@ -377,12 +434,12 @@ def dynamic_issue_openai(request):
     embed_completion = generate_embedding(completion)
 
     # Get midpoint
-    midpoint = (float(request.session.get('min_scale')) + float(request.session.get('max_scale'))) / 2
+    midpoint = (float(get_global_setting('min_scale')) +
+                float(get_global_setting('max_scale'))) / 2
 
     # If midpoint is empty, set it to 3
     if not midpoint:
         midpoint = 3
-
 
     # Check if the completion is toxic, similar, or identical
     if is_text_toxic(completion) or has_high_similarity(completion):
@@ -401,6 +458,7 @@ def dynamic_issue_openai(request):
         dynamic_issue_question.save()  # Save the instance to the database
 
     return JsonResponse({'completion': completion})
+
 
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
@@ -441,7 +499,8 @@ def dynamic_issue_mistral(request):
     embed_completion = generate_embedding_alt(completion)
 
     # Get midpoint
-    midpoint = (float(request.session.get('min_scale')) + float(request.session.get('max_scale'))) / 2
+    midpoint = (float(get_global_setting('min_scale')) +
+                float(get_global_setting('max_scale'))) / 2
 
     # If midpoint is empty, set it to 3
     if not midpoint:
@@ -511,51 +570,89 @@ def update_rating(request):
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
-@csrf_exempt  
+
+@csrf_exempt
 @require_http_methods(["POST"])
 def update_ratings(request):
+    logger = logging.getLogger(__name__)
+
     try:
         data = json.loads(request.body)
-        if not data:
-            return JsonResponse({'status': 'error', 'message': 'No data provided.'}, status=400)
+        logger.info("Received data: %s", data)
 
-        for question_text, rating in data.items():
+        ratings = data.get('ratings', [])
+        if not ratings:
+            logger.error("No ratings provided in the request.")
+            return JsonResponse(
+                {
+                    'status': 'error',
+                    'message': 'No ratings provided.'
+                },
+                status=400)
+
+        for rating_info in ratings:
+            question_text = rating_info.get('question')
+            user_id = rating_info.get('user_id')
+            rating = float(rating_info.get('rating'))
+            logger.info("Processing rating for question '%s' with rating %f",
+                        question_text, rating)
+
+            # Check if session min_scale and max_scale are set. If not, set to 1 and 5 respectively
+            min_scale = float(get_global_setting('min_scale'))
+            max_scale = float(get_global_setting('max_scale'))
+
+            if rating < min_scale or rating > max_scale:
+                continue  # Skip invalid ratings
+
+            # Retrieve the question from the database and update the ratings
             try:
-                rating = float(rating)
-                # Check if session min_scale and max_scale are set. If not, set to 1 and 5 respectively
-                if not request.session.get('min_scale'):
-                    request.session['min_scale'] = 1
-                if not request.session.get('max_scale'):
-                    request.session['max_scale'] = 5
-
-                if rating < float(request.session.get('min_scale')) or rating > float(request.session.get('max_scale')):
-                    continue  # Skip invalid ratings
-
-                # Retrieve the question from the database
-                question = DynamicIssueQuestion.objects.get(question=question_text)
-                question.avg_rating = ((question.avg_rating * question.ratings) + rating) / (question.ratings + 1)
+                question = DynamicIssueQuestion.objects.get(
+                    question=question_text)
+                question.avg_rating = (
+                    (question.avg_rating * question.ratings) +
+                    rating) / (question.ratings + 1)
                 question.ratings += 1
+                question.var_rating = 1 / question.ratings
                 question.save()
+
+                UserDatabase.objects.update_or_create(
+                    user_id=user_id,
+                    question=question_text,
+                    defaults={'rating': rating})
 
             except DynamicIssueQuestion.DoesNotExist:
                 # Skip if question not found
                 continue
-            except ValueError:
-                # Skip if the rating is not a valid number
-                continue
 
-        return JsonResponse({'status': 'success', 'message': 'Ratings updated successfully.'})
+        return JsonResponse({
+            'status': 'success',
+            'message': 'Ratings updated successfully.'
+        })
 
-    except json.JSONDecodeError:
-        return JsonResponse({'status': 'error', 'message': 'Invalid JSON format.'}, status=400)
+    except json.JSONDecodeError as e:
+        logger.exception("JSON decode error: %s", e)
+        return JsonResponse(
+            {
+                'status': 'error',
+                'message': 'Invalid JSON format.'
+            }, status=400)
     except Exception as e:
+        logger.exception("Unexpected error: %s", e)
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+    logger.info("Ratings updated successfully.")
+    return JsonResponse({
+        'status': 'success',
+        'message': 'Ratings updated successfully.'
+    })
+
 
 @require_http_methods(["GET"])
 def view_issues(request):
     questions = DynamicIssueQuestion.objects.all()
     questions_json = serializers.serialize('json', questions)
     return JsonResponse(questions_json, safe=False)
+
 
 def select_questions_simulation(request):
     # Getting all questions from the database
@@ -589,12 +686,13 @@ def select_questions_simulation(request):
     proportions /= proportions.sum()
 
     # Get midpoint
-    midpoint = (float(request.session.get('min_scale')) + float(request.session.get('max_scale'))) / 2
+    midpoint = (float(get_global_setting('min_scale')) +
+                float(get_global_setting('max_scale'))) / 2
     # If midpoint is empty, set it to 3
     if not midpoint:
         midpoint = 3
 
-    num_items_str = request.session.get('num_items')
+    num_items_str = get_global_setting('num_items')
     print(num_items_str)
     # Set a default value if num_items is not found or if it's None
     num_items = int(num_items_str) if num_items_str is not None else midpoint
@@ -616,10 +714,11 @@ def select_questions_simulation(request):
 
     return JsonResponse(selected_questions, safe=False)
 
+
 def survey_view(request):
-    min_scale = request.session.get('min_scale', 1)  # Default to 1 if not set
-    max_scale = request.session.get('max_scale', 5)  # Default to 5 if not set
-    survey_text = request.session.get('survey_text', 'Rate the questions in importance on a 1-5 scale.')
+    min_scale = get_global_setting('min_scale')  # Default to 1 if not set
+    max_scale = get_global_setting('max_scale')  # Default to 5 if not set
+    survey_text = get_global_setting('survey_text')
 
     if survey_text is None:
         survey_text = 'Rate the questions in importance on a 1-5 scale.'

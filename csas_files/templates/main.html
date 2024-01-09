@@ -83,7 +83,7 @@
                             <div class="mb-4">
                                 <label class="block text-gray-700 text-sm font-bold mb-2" for="aiChoice">Select API:</label>
                                 <select name="ai_choice" id="aiChoice" onchange="updateURLs()" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
-                                    <option value="openai" selected>OpenAI (GPT-4)</option>
+                                    <option value="openai" selected>OpenAI (GPT-3.5 Turbo)</option>
                                     <option value="mistral">AnyScale (Mixtral 8x7b)</option>
                                 </select>
                             </div>
@@ -120,6 +120,9 @@
                             <label class="block text-gray-700 text-sm font-bold mb-2" for="issue">Set Question Text:</label>
                             <textarea id="survey_text" name="survey_text" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" placeholder="Rate on a 1-5 scale how important the issue is to you." style="white-space: pre-wrap;"></textarea>
                         </div>
+                      <div class="mb-4">
+                          <button type="button" onclick="saveSessionData()" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline cursor-pointer">Save Question Text</button>
+                      </div>
                         <div class="mb-4">
                             <label class="block text-gray-700 text-sm font-bold mb-2">Copy and paste this into Qualtrics for Easy CSAS:</label>
                             <input type="text" value="{{ ez_url }}" id="EZUrl" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" readonly>

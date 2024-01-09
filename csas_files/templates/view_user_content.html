@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>User Data</title>
+</head>
+<body>
+    <h1>User Data</h1>
+    <table border="1">
+        <tr>
+            <th>ID</th>
+            <th>Question</th>
+            <th>Rating</th>
+        </tr>
+        {% for user in user_data %}
+        <tr>
+            <td>{{ user.user_id }}</td>
+            <td>{{ user.question }}</td>
+            <td>{{ user.rating }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>

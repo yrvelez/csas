@@ -48,116 +48,117 @@
 
   </div>
   
-    <script>
-        var minScale = "{{ min_scale }}";
-        var maxScale = "{{ max_scale }}";
-        var surveyText = "{{ survey_text }}";
-    
-document.getElementById('issue-form').addEventListener('submit', function(event) {
-    event.preventDefault();
+  <script>
+  var user_id = window.location.search.split('=')[1];
+  var minScale = "{{ min_scale }}";  // Replace with your actual minimum scale value
+  var maxScale = "{{ max_scale }}";  // Replace with your actual maximum scale value
+  var surveyText = "{{ survey_text }}";  // Replace with your actual survey text
 
-    var input = document.getElementById('input').value;
+  document.getElementById('issue-form').addEventListener('submit', async function(event) {
+      event.preventDefault();
+      var input = document.getElementById('input').value;
+      console.log('Input:', input);
 
-    // Return input
-    console.log('Input:', input);
+      try {
+          // Fetch the user submission
+          let response = await fetch('/dynamic-issue-oai/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ input: input })
+          });
+          let data = await response.json();
 
-    // Submit the issue
-    fetch('/dynamic-issue-oai/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: input })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.completion) {
-            window.userSubmission = data.completion;
-            console.log('User submission:', window.userSubmission);
-            fetchSurveyQuestions();
-        }
-    })
-    .catch(error => console.error('Error:', error));
-});
+          if (data.completion) {
+              window.userSubmission = data.completion;
+              console.log('User submission:', window.userSubmission);
 
-function fetchSurveyQuestions() {
-    fetch('/select-questions-simulation/')
-    .then(response => response.json())
-    .then(data => {
-        // Combine user's submission with the fetched questions
-        let questions = transformQuestionsData(data);
-        questions = [{ text: window.userSubmission }].concat(questions);
-        displaySurveyQuestions(questions);
-        document.getElementById('survey-matrix-panel').classList.remove('hidden');
-    })
-    .catch(error => console.error('Error:', error));
-}
+              // Fetch the survey questions and include the user submission
+              await fetchSurveyQuestions();
+          }
+      } catch (error) {
+          console.error('Error:', error);
+      }
+  });
 
-function transformQuestionsData(data) {
-    let questions = [];
-    for (const key in data) {
-        if (key.startsWith('q_')) {
-            questions.push({ text: data[key] });
-        }
-    }
-    return questions;
-}
+  async function fetchSurveyQuestions() {
+      try {
+          let response = await fetch('/select-questions-simulation/');
+          let data = await response.json();
 
-function displaySurveyQuestions(questions) {
-    var surveyQuestionsDiv = document.getElementById('survey-questions');
-    surveyQuestionsDiv.innerHTML = '';
-    surveyQuestionsDiv.appendChild(createQuestionMatrix(questions));
-}
+          let questions = transformQuestionsData(data);
+          questions.unshift({ text: window.userSubmission });  // Add user submission at the beginning
 
-function createQuestionMatrix(questions) {
+          displaySurveyQuestions(questions);
+          document.getElementById('survey-matrix-panel').classList.remove('hidden');
+      } catch (error) {
+          console.error('Error:', error);
+      }
+  }
 
-    var table = document.createElement('table');
-    table.classList.add('w-full');
+  function transformQuestionsData(data) {
+      let questions = [];
+      for (const key in data) {
+          if (key.startsWith('q_')) {
+              questions.push({ text: data[key] });
+          }
+      }
+      return questions;
+  }
 
-    // Add the dynamic table header row
-    var headerRow = table.insertRow(-1);
-    var headerCell = headerRow.insertCell(0);
-    headerCell.textContent = surveyText;
-    headerCell.classList.add('bg-gray-200', 'text-gray-600', 'font-bold', 'p-4');
+  function displaySurveyQuestions(questions) {
+      var surveyQuestionsDiv = document.getElementById('survey-questions');
+      surveyQuestionsDiv.innerHTML = '';
+      surveyQuestionsDiv.appendChild(createQuestionMatrix(questions));
+  }
 
-    questions.forEach((question, index) => {
+  function createQuestionMatrix(questions) {
+      var table = document.createElement('table');
+      table.classList.add('w-full');
 
-    var row = table.insertRow(-1);
+      // Add the dynamic table header row
+      var headerRow = table.insertRow(-1);
+      var headerCell = headerRow.insertCell(0);
+      headerCell.textContent = surveyText;
+      headerCell.classList.add('bg-gray-200', 'text-gray-600', 'font-bold', 'p-4');
 
-    var cellQuestion = row.insertCell(0);
-    cellQuestion.classList.add('bg-gray-100', 'p-4', 'font-medium'); 
-    cellQuestion.textContent = question.text;
+      questions.forEach((question, index) => {
+          var row = table.insertRow(-1);
+          var cellQuestion = row.insertCell(0);
+          cellQuestion.classList.add('bg-gray-100', 'p-4', 'font-medium'); 
+          cellQuestion.textContent = question.text;
 
-    for (let rating = minScale; rating <= maxScale; rating++) {
-        
-        let cellRating = row.insertCell(-1);
-        
-        let radioInput = document.createElement('input');
-        radioInput.type = 'radio';
-        radioInput.name = 'rating-' + index;
-        radioInput.value = rating;
-        radioInput.classList.add('mr-2');
+          for (let rating = minScale; rating <= maxScale; rating++) {
+              let cellRating = row.insertCell(-1);
+              let radioInput = document.createElement('input');
+              radioInput.type = 'radio';
+              radioInput.name = 'rating-' + index;
+              radioInput.value = rating;
+              radioInput.classList.add('mr-2');
 
-        let label = document.createElement('label');
-        label.textContent = rating;
-        label.htmlFor = 'rating-' + index + '-' + rating;
-        label.classList.add('inline-block');
+              let label = document.createElement('label');
+              label.textContent = rating;
+              label.htmlFor = 'rating-' + index + '-' + rating;
+              label.classList.add('inline-block');
 
-        cellRating.appendChild(radioInput);
-        cellRating.appendChild(label);
-    }
+              cellRating.appendChild(radioInput);
+              cellRating.appendChild(label);
+          }
+      });
 
-    });
-
-    return table;
-}
+      return table;
+  }
+      
 function submitRatings() {
-    var ratingsData = {};
+    var ratingsData = [];
 
     // Collect ratings data from the form
     var ratingElements = document.querySelectorAll("#rating-form input[type='radio']:checked");
     ratingElements.forEach(function(element) {
-        var questionText = element.closest('tr').cells[0].textContent; // Assuming the first cell of the row contains the question text
-        var rating = element.value;
-        ratingsData[questionText] = rating;
+        var questionText = element.closest('tr').cells[0].textContent; 
+        var rating = parseFloat(element.value);
+        ratingsData.push({ question: questionText, rating: rating, user_id: user_id });
+        // console log to check things are working
+        console.log('Question:', questionText, 'Rating:', rating, 'User ID:', user_id);
     });
 
     // AJAX call to submit the ratings
@@ -166,8 +167,9 @@ function submitRatings() {
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify(ratingsData)
+        body: JSON.stringify({ratings: ratingsData})
     })
+
     .then(response => response.json())
     .then(data => {
         if (data.status === 'success') {
